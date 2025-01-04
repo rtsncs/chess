@@ -11,14 +11,14 @@ use constant {
         RANK_6 => 0xFF << (8 * 5),
         RANK_7 => 0xFF << (8 * 6),
         RANK_8 => 0xFF << (8 * 7),
-        FILE_A => 72340172838076673,
-        FILE_B => 72340172838076673 << 1,
-        FILE_C => 72340172838076673 << 2,
-        FILE_D => 72340172838076673 << 3,
-        FILE_E => 72340172838076673 << 4,
-        FILE_F => 72340172838076673 << 5,
-        FILE_G => 72340172838076673 << 6,
-        FILE_H => 72340172838076673 << 7,
+        FILE_A => 72340172838076673 << 7,
+        FILE_B => 72340172838076673 << 6,
+        FILE_C => 72340172838076673 << 5,
+        FILE_D => 72340172838076673 << 4,
+        FILE_E => 72340172838076673 << 3,
+        FILE_F => 72340172838076673 << 2,
+        FILE_G => 72340172838076673 << 1,
+        FILE_H => 72340172838076673,
 };
 
 my $board = {};
@@ -211,8 +211,50 @@ sub king_moves {
     return @moves;
 }
 
+# northwest    north   northeast
+#noWe         nort         noEa
+#        +9    +8    +7
+#            \  |  /
+#west    +1 <-  0 -> -1    east
+#            /  |  \
+#        -7    -8    -9
+#soWe         sout         soEa
+#southwest    south   southeast
+
+sub knight_moves() {
+    my $bit_moves;
+    my @moves;
+
+    my $knights = $board->{turn} ? $board->{pieces}->{n} : $board->{pieces}->{N};
+
+    for my $i (0..63) {
+        my $mask = 1 << $i;
+        if ($knights & $mask) {
+            my $current_knight = $mask;
+            $bit_moves = ($current_knight & ~(RANK_8 | FILE_A | FILE_B)) << 10;
+            $bit_moves |= ($current_knight & ~(RANK_8 | FILE_G | FILE_H)) << 6;
+            $bit_moves |= ($current_knight & ~(RANK_1 | FILE_A | FILE_B)) >> 6;
+            $bit_moves |= ($current_knight & ~(RANK_1 | FILE_G | FILE_H)) >> 10;
+            $bit_moves |= ($current_knight & ~(RANK_8 | RANK_7 | FILE_A)) << 17;
+            $bit_moves |= ($current_knight & ~(RANK_8 | RANK_7 | FILE_H)) << 15;
+            $bit_moves |= ($current_knight & ~(RANK_1 | RANK_2 | FILE_A)) >> 15;
+            $bit_moves |= ($current_knight & ~(RANK_1 | RANK_2 | FILE_H)) >> 17;
+
+            $bit_moves &= $board->{turn} ? ~black_pieces() : ~white_pieces();
+
+            for my $j (0..63) {
+                my $move_mask = 1 << $j;
+                if ($bit_moves & $move_mask) {
+                    push(@moves, 0 | ($i << 4) | ($j << 12));
+                }
+            }
+        }
+    }
+    return @moves;
+}
+
 sub moves {
-    return (pawn_moves(), king_moves());
+    return (pawn_moves(), king_moves(), knight_moves());
 }
 
 sub print_board {
