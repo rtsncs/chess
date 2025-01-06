@@ -1,5 +1,26 @@
 #!/bin/bash
 
+TEMP=$(getopt -o "a:p:" -n "$0" -- "$@")
+eval set -- "$TEMP"
+
+ADDRESS=localhost
+PORT=38519
+
+while true; do
+    case $1 in
+        -a)
+            ADDRESS=$2
+            shift 2;;
+        -p)
+            PORT=$2
+            shift 2;;
+        --)
+            shift
+            break;;
+    esac
+done
+
+printf '\e[?1049h'
 stty cbreak -echo -nl
 
 board=()
@@ -56,6 +77,7 @@ compose_fen() {
 }
 
 draw() {
+    printf '\e[2J\e[H'
     row=8
     col=8
     for piece in ${board[@]}; do
@@ -92,16 +114,15 @@ draw() {
     printf "A B C D E F G H\n"
 }
 
-parse_fen "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-# parse_fen "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"
-draw
-compose_fen
-
-move=
-
+exec 3<>/dev/tcp/$ADDRESS/$PORT
 while true; do
-    char=$(dd bs=1 count=1 2>/dev/null)
+    IFS= read -r -t0.1 fen <&3
+    if [[ -n "$fen" ]]; then
+        parse_fen "$fen"
+        draw
+    fi
 
+    read -r -n1 -t0.1 char
     case $char in
         q) break;;
         *) ;;
@@ -109,3 +130,5 @@ while true; do
 done
 
 stty sane
+
+printf '\e[?1049l'
