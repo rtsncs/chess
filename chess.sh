@@ -78,43 +78,88 @@ compose_fen() {
     echo "$fen_board"
 }
 
+file_to_number() {
+    case $1 in
+        a) echo 0;;
+        b) echo 1;;
+        c) echo 2;;
+        d) echo 3;;
+        e) echo 4;;
+        f) echo 5;;
+        g) echo 6;;
+        h) echo 7;;
+    esac
+}
+
+piece_to_char() {
+    case $1 in
+        [K]) echo ♔ ;;
+        [Q]) echo ♕ ;;
+        [R]) echo ♖ ;;
+        [B]) echo ♗ ;;
+        [N]) echo ♘ ;;
+        [P]) echo ♙ ;;
+        [k]) echo ♚ ;;
+        [q]) echo ♛ ;;
+        [r]) echo ♜ ;;
+        [b]) echo ♝ ;;
+        [n]) echo ♞ ;;
+        [p]) echo ♟ ;;
+        ".") echo " ";;
+    esac
+}
+
+piece_color="\e[30m"
+black_color="\e[46m"
+white_color="\e[107m"
+from_color="\e[43m"
+to_color="\e[105m"
+possible_color="\e[102m"
+
+draw_square() {
+    file=$(file_to_number ${1:0:1})
+    rank=$((8 - ${1:1:1}))
+    piece=$(piece_to_char ${board[((rank * 8 + file))]})
+
+    bg_col=$2
+    
+    if [[ -z $bg_col ]]; then
+        if (((rank + file) % 2 == 0)); then
+            bg_col=$white_color
+        else
+            bg_col=$black_color
+        fi
+    fi
+
+    printf "\e[s\e[%s;%sH$piece_color$bg_col$piece \e[u\e[m" $((rank + 1)) $((file * 2 + 1))
+}
+
+draw_file() {
+    file=$1
+}
+
 draw() {
-    printf '\e[2J\e[H'
+    buffer='\e[2J\e[H'
     row=8
     col=8
     for piece in ${board[@]}; do
-        fg_col="\e[30m" # black
-        bg_col="\e[46m" # cyan
+        bg_col=$black_color
         if (((row + col) % 2 == 0)); then
-            bg_col="\e[107m" #bright white
+            bg_col=$white_color
         fi
 
-        case $piece in
-            [K]) piece=♔ ;;
-            [Q]) piece=♕ ;;
-            [R]) piece=♖ ;;
-            [B]) piece=♗ ;;
-            [N]) piece=♘ ;;
-            [P]) piece=♙ ;;
-            [k]) piece=♚ ;;
-            [q]) piece=♛ ;;
-            [r]) piece=♜ ;;
-            [b]) piece=♝ ;;
-            [n]) piece=♞ ;;
-            [p]) piece=♟ ;;
-            ".") piece=" ";;
-        esac
+        piece=$(piece_to_char $piece)
 
-        printf "$bg_col$fg_col$piece "
+        buffer="$buffer$bg_col$piece_color$piece "
         if ((--col < 1 )); then
             col=8
-            printf "\e[m $row\n"
+            buffer="$buffer\e[m $row\n"
             ((row--))
         fi
     done
 
-    printf "A B C D E F G H\n"
-    printf "$move";
+    buffer="${buffer}A B C D E F G H\n$move"
+    printf "$buffer"
 }
 
 exec 3<>/dev/tcp/$ADDRESS/$PORT
@@ -122,16 +167,58 @@ while true; do
     IFS="|" read -r -t0.01 fen moves <&3
     if [[ -n "$fen" ]]; then
         parse_fen "$fen"
+        moves=($moves)
         draw
     fi
 
     IFS= read -r -N1 -t0.01 char
     case $char in
         q) break;;
-        [a-h1-8]) move="$move$char"; printf $char;;
+        [a-h])
+            if [[ ${#move} -eq 0 ]] || [[ ${#move} -eq 2 ]]; then
+                move="$move$char"
+                printf $char
+            fi
+            ;;
+        [1-8])
+            if [[ ${#move} -eq 1 ]] || [[ ${#move} -eq 3 ]]; then
+                color=$from_color
+                if [[ ${#move} -eq 3 ]]; then
+                    color=$to_color
+                fi
+                move="$move$char"
+                draw_square ${move: -2} $color
+                printf $char
+                if [[ ${#move} -eq 2 ]]; then
+                    for m in "${moves[@]}"; do
+                        if [[ "$m" == "$move"* ]]; then
+                            draw_square ${m:2:2} $possible_color
+                        fi
+                    done
+                fi
+            fi
+            ;;
+        [bnrq])
+            if [[ ${#move} -eq 4 ]]; then
+                move="$move$char"
+                printf $char
+            fi
+            ;;
         $'\n') echo "make_move $move" 1>&3; move=;;
-        $'\177') 
-            if [[ -n "$move" ]]; then
+        $'\177')
+            if [[ ${#move} -eq 2 ]] || [[ ${#move} -eq 4 ]]; then
+                if [[ ${#move} -eq 2 ]]; then
+                    for m in "${moves[@]}"; do
+                        if [[ "$m" == "$move"* ]]; then
+                            draw_square ${m:2:2}
+                        fi
+                    done
+                fi
+                square=${move: -2}
+                move=${move::-1}
+                printf "\e[D \e[D"
+                draw_square $square
+            elif [[ -n $move ]]; then
                 move=${move::-1}
                 printf "\e[D \e[D"
             fi
