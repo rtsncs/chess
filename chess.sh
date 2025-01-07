@@ -24,6 +24,8 @@ printf '\e[?1049h'
 stty cbreak -echo -nl
 
 board=()
+moves=
+move=
 active=
 
 parse_fen() {
@@ -112,19 +114,28 @@ draw() {
     done
 
     printf "A B C D E F G H\n"
+    printf "$move";
 }
 
 exec 3<>/dev/tcp/$ADDRESS/$PORT
 while true; do
-    IFS= read -r -t0.1 fen <&3
+    IFS="|" read -r -t0.01 fen moves <&3
     if [[ -n "$fen" ]]; then
         parse_fen "$fen"
         draw
     fi
 
-    read -r -n1 -t0.1 char
+    IFS= read -r -N1 -t0.01 char
     case $char in
         q) break;;
+        [a-h1-8]) move="$move$char"; printf $char;;
+        $'\n') echo "make_move $move" 1>&3; move=;;
+        $'\177') 
+            if [[ -n "$move" ]]; then
+                move=${move::-1}
+                printf "\e[D \e[D"
+            fi
+            ;;
         *) ;;
     esac
 done

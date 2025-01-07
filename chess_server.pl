@@ -165,7 +165,7 @@ sub parse_move {
 }
 
 sub move_to_string {
-    my $move = shift;
+    my $move = $_;
     my $from = ($move >> 4) & 63;
     my $to = ($move >> 12) & 63;
     my $promotion = $move & 15;
@@ -371,9 +371,11 @@ sub make_move {
         $board->{turn} = !$board->{turn};
         @moves = moves();
 
+        my $update = compose_fen() . "|" . join(" ", map(move_to_string, @moves)) . "\n";
+
         foreach my $client ($select->can_write(1)) {
             if ($client != $socket) {
-                $client->send(compose_fen() . "\n");
+                $client->send($update);
             }
         }
     }
@@ -402,7 +404,8 @@ while (1) {
             $client = $socket->accept();
             $select->add($client);
             #setnonblock $client;
-            $client->send(compose_fen() . "\n");
+            my $update = compose_fen() . "|" . join(" ", map(move_to_string, @moves)) . "\n";
+            $client->send($update);
         } else {
             my $count = $client->recv(my $data, 1024);
             unless (defined($count) && length $data) {
