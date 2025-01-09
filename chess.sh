@@ -1,5 +1,12 @@
 #!/bin/bash
 
+piece_color="\e[30m"
+black_color="\e[46m"
+white_color="\e[107m"
+from_color="\e[43m"
+to_color="\e[105m"
+possible_color="\e[102m"
+
 TEMP=$(getopt -o "a:p:" -n "$0" -- "$@")
 eval set -- "$TEMP"
 
@@ -19,9 +26,6 @@ while true; do
             break;;
     esac
 done
-
-printf '\e[?1049h'
-stty cbreak -echo -nl
 
 board=()
 moves=
@@ -47,35 +51,6 @@ parse_fen() {
 
         esac
     done
-}
-
-compose_fen() {
-    fen_board=""
-    empty_count=0
-    file_count=0
-    for piece in ${board[@]}; do
-        if (( $file_count >= 8)); then
-            if (( $empty_count > 0)); then
-                fen_board+="$empty_count"
-                empty_count=0
-            fi
-            file_count=0
-            fen_board+="/"
-        fi
-
-        if [[ $piece = "." ]]; then
-            ((empty_count++))
-        else
-            if (( $empty_count > 0)); then
-                fen_board+="$empty_count"
-                empty_count=0
-            fi
-            fen_board+=$piece
-        fi
-        ((file_count++))
-    done
-
-    echo "$fen_board"
 }
 
 file_to_number() {
@@ -108,13 +83,6 @@ piece_to_char() {
         ".") echo " ";;
     esac
 }
-
-piece_color="\e[30m"
-black_color="\e[46m"
-white_color="\e[107m"
-from_color="\e[43m"
-to_color="\e[105m"
-possible_color="\e[102m"
 
 draw_square() {
     file=$(file_to_number ${1:0:1})
@@ -161,6 +129,17 @@ draw() {
     buffer="${buffer}A B C D E F G H\n$move"
     printf "$buffer"
 }
+
+cleanup() {
+    stty sane
+    printf '\e[?1049l'
+    exit
+}
+
+trap cleanup SIGTERM SIGINT
+
+printf '\e[?1049h'
+stty cbreak -echo -nl
 
 exec 3<>/dev/tcp/$ADDRESS/$PORT
 while true; do
@@ -227,6 +206,4 @@ while true; do
     esac
 done
 
-stty sane
-
-printf '\e[?1049l'
+cleanup
