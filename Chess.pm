@@ -138,12 +138,31 @@ sub all_pieces {
     return $self->{whites} | $self->{blacks};
 }
 
+sub allied_pieces {
+    my $self = shift;
+    return ($self->{turn} ? $self->{blacks} : $self->{whites});
+}
+
+sub enemy_pieces {
+    my $self = shift;
+    return ($self->{turn} ? $self->{whites} : $self->{blacks});
+}
+
+# northwest    north   northeast
+#noWe         nort         noEa
+#        +9    +8    +7
+#            \  |  /
+#west    +1 <-  0 -> -1    east
+#            /  |  \
+#        -7    -8    -9
+#soWe         sout         soEa
+#southwest    south   southeast
 sub pawn_moves {
     my $self = shift;
     my $bit_moves;
     my @moves;
 
-    my $pawns = $self->{pawns} & ($self->{turn} ? $self->{blacks} : $self->{whites});
+    my $pawns = $self->{pawns} & $self->allied_pieces();
     if (!$self->{turn}) {
         $bit_moves = ($pawns << 8) & ~$self->all_pieces();
         for my $i (0..63) {
@@ -203,7 +222,7 @@ sub king_moves {
     my $bit_moves;
     my @moves;
 
-    my $king = $self->{kings} & ($self->{turn} ? $self->{blacks} : $self->{whites});
+    my $king = $self->{kings} & $self->allied_pieces();
     $bit_moves = ($king & ~RANK_1) >> 8;
     $bit_moves |= ($king & ~RANK_8) << 8;
     $bit_moves |= ($king & ~FILE_A) << 1;
@@ -213,7 +232,7 @@ sub king_moves {
     $bit_moves |= ($king & ~(RANK_8 | FILE_A)) << 9;
     $bit_moves |= ($king & ~(RANK_8 | FILE_H)) << 7;
 
-    $bit_moves &= $self->{turn} ? ~$self->{blacks} : ~$self->{whites};
+    $bit_moves &= ~$self->allied_pieces();
 
     my $from;
 
@@ -235,22 +254,12 @@ sub king_moves {
     return @moves;
 }
 
-# northwest    north   northeast
-#noWe         nort         noEa
-#        +9    +8    +7
-#            \  |  /
-#west    +1 <-  0 -> -1    east
-#            /  |  \
-#        -7    -8    -9
-#soWe         sout         soEa
-#southwest    south   southeast
-
 sub knight_moves() {
     my $self = shift;
     my $bit_moves;
     my @moves;
 
-    my $knights = $self->{knights} & ($self->{turn} ? $self->{blacks} : $self->{whites});
+    my $knights = $self->{knights} & $self->allied_pieces();
 
     for my $i (0..63) {
         my $mask = 1 << $i;
@@ -265,7 +274,7 @@ sub knight_moves() {
             $bit_moves |= ($current_knight & ~(RANK_1 | RANK_2 | FILE_A)) >> 15;
             $bit_moves |= ($current_knight & ~(RANK_1 | RANK_2 | FILE_H)) >> 17;
 
-            $bit_moves &= $self->{turn} ? ~$self->{blacks} : ~$self->{whites};
+            $bit_moves &= ~$self->allied_pieces();
 
             for my $j (0..63) {
                 my $move_mask = 1 << $j;
@@ -278,9 +287,47 @@ sub knight_moves() {
     return @moves;
 }
 
+sub sliding_moves {
+    my $self = shift;
+    my @moves;
+
+    my $ortho_pieces = ($self->{rooks} | $self->{queens}) & $self->allied_pieces();
+    my $diag_pieces = ($self->{bishops} | $self->{queens}) & $self->allied_pieces();
+
+    my @directions = (
+        { shift => 8, mask => ~RANK_8, pieces => $ortho_pieces },
+        { shift => -8, mask => ~RANK_1, pieces => $ortho_pieces },
+        { shift => 1, mask => ~FILE_A, pieces => $ortho_pieces },
+        { shift => -1, mask => ~FILE_H, pieces => $ortho_pieces },
+        { shift => 9, mask => ~(RANK_8 | FILE_A), pieces => $diag_pieces },
+        { shift => 7, mask => ~(RANK_8 | FILE_H), pieces => $diag_pieces },
+        { shift => -7, mask => ~(RANK_1 | FILE_A), pieces => $diag_pieces },
+        { shift => -9, mask => ~(RANK_1 | FILE_H), pieces => $diag_pieces },
+    );
+    
+    foreach my $dir (@directions) {
+        my $bit_moves = $dir->{pieces};
+        my $distance = 0;
+        while ($bit_moves) {
+            $distance += $dir->{shift};
+            $bit_moves &= $dir->{mask};
+            $bit_moves <<= $dir->{shift};
+            $bit_moves &= ~$self->allied_pieces();
+            for my $i (0..63) {
+                my $mask = 1 << $i;
+                if ($bit_moves & $mask) {
+                    push(@moves, 0 | (($i - $distance) << 4) | ($i << 12));
+                }
+            }
+            $bit_moves &= ~$self->enemy_pieces();
+        }
+    }
+    return @moves;
+}
+
 sub generate_moves {
     my $self = shift;
-    my @moves = ($self->pawn_moves(), $self->king_moves(), $self->knight_moves());
+    my @moves = ($self->pawn_moves(), $self->king_moves(), $self->knight_moves(), $self->sliding_moves());
     $self->{moves} = \@moves;
 }
 

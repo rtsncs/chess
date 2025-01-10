@@ -143,10 +143,10 @@ stty cbreak -echo -nl
 
 exec 3<>/dev/tcp/$ADDRESS/$PORT
 while true; do
-    IFS="|" read -r -t0.01 fen moves <&3
+    IFS="|" read -r -t0.01 fen moves_str <&3
     if [[ -n "$fen" ]]; then
         parse_fen "$fen"
-        moves=($moves)
+        moves=($moves_str)
         draw
     fi
 
