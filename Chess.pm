@@ -31,7 +31,7 @@ sub from_fen {
         turn => $turn,
         halfmove => $halfmove,
         fullmove => $fullmove,
-        en_passant => $en_passant eq "-" ? -1 : notation_to_index($en_passant),
+        en_passant => $en_passant eq "-" ? 64 : notation_to_index($en_passant),
         castling => $castling,
         pawns => 0,
         rooks => 0,
@@ -129,7 +129,7 @@ sub to_fen {
         $fen_board,
         $self->{turn},
         $self->{castling},
-        $self->{en_passant} == -1 ? "-" : index_to_notation($self->{en_passant}),
+        $self->{en_passant} == 64 ? "-" : index_to_notation($self->{en_passant}),
         $self->{halfmove},
         $self->{fullmove},
     );
@@ -192,7 +192,7 @@ sub pawn_moves {
     for my $i (0..63) {
         my $mask = 1 << $i;
         if ($bit_moves & $mask) {
-            push(@moves, { from => $i - $double_shift, to => $i, promotion => 0});
+            push(@moves, { from => $i - $double_shift, to => $i, promotion => 0, en_passant => $i - $shift });
         }
     }
 
@@ -205,7 +205,7 @@ sub pawn_moves {
         { shift => -9, mask => ~(RANK_1 | FILE_H) },
     );
     for my $dir (@directions) {
-        $bit_moves = (($pawns & $dir->{mask}) << $dir->{shift}) & $self->enemy_pieces();
+        $bit_moves = (($pawns & $dir->{mask}) << $dir->{shift}) & ($self->enemy_pieces() | (1 << $self->{en_passant}));
         for my $i (0..63) {
             my $mask = 1 << $i;
             if ($bit_moves & $mask) {
@@ -342,7 +342,7 @@ sub pseudo_legal_moves() {
 
 sub generate_moves {
     my $self = shift;
-    my @moves = ($self->pawn_moves(), $self->king_moves(), $self->knight_moves(), $self->sliding_moves());
+    my @moves = $self->pseudo_legal_moves();
     my @legal_moves;
 
     for my $move (@moves) {
@@ -398,50 +398,54 @@ sub parse_make_move {
     my $self = shift;
     my $move = parse_move(shift);
 
-    my $valid = 0;
     foreach my $m (@{$self->{moves}}) {
         if ($m->{from} == $move->{from} && $m->{to} == $move->{to} && $m->{promotion} == $move->{promotion}) {
-            $valid = 1;
-            last;
+            $self->make_move($m);
+            $self->generate_moves();
+            return 1;
         }
     }
-    if ($valid) {
-        $self->make_move($move);
-        $self->generate_moves();
-    }
-    return $valid;
+    return 0;
 }
 
 sub make_move {
-    my $self = shift;
-    my $move = shift;
-
+    my ($self, $move) = @_;
     my $from_mask = 1 << $move->{from};
     my $to_mask = 1 << $move->{to};
 
     $move->{castling} = $self->{castling};
     $move->{halfmove} = $self->{halfmove};
-    $move->{en_passant} = $self->{en_passant};
     $move->{captured_piece} = "";
 
     $self->{halfmove}++;
 
-    for my $p ("pawns", "rooks", "bishops", "knights", "queens", "kings") {
-        if ($self->{$p} & $to_mask) {
-            $self->{$p} &= ~$to_mask;
+    # bicie
+    for my $piece_type ("pawns", "rooks", "bishops", "knights", "queens", "kings") {
+        if ($self->{$piece_type} & $to_mask) {
+            $self->{$piece_type} &= ~$to_mask;
             $self->{halfmove} = 0;
-            $move->{captured_piece} = $p;
+            $move->{captured_piece} = $piece_type;
             last;
         }
     }
-    for my $pieces ($self->{pawns}, $self->{rooks}, $self->{bishops}, $self->{knights}, $self->{queens}, $self->{kings}) {
-        if ($pieces & $from_mask) {
-            if ($pieces == $self->{pawns}) {
-                $self->{halfmove} = 0;
-            }
 
-            $pieces &= ~$from_mask;
-            $pieces |= $to_mask;
+    # ruch bierką
+    for my $piece_type ("pawns", "rooks", "bishops", "knights", "queens", "kings") {
+        if ($self->{$piece_type} & $from_mask) {
+            $self->{$piece_type} &= ~$from_mask;
+            $self->{$piece_type} |= $to_mask;
+
+            if ($piece_type eq "pawns") {
+                $self->{halfmove} = 0;
+
+                if ($move->{to} == $self->{en_passant}) {
+                    my $shift = $self->{turn} eq 'w' ? -8 : 8;
+                    my $captured_square = 1 << ($move->{to} + $shift);
+                    $self->{pawns} &= ~($captured_square);
+                    $self->{whites} &= ~($captured_square);
+                    $self->{blacks} &= ~($captured_square);
+                }
+            }
             last;
         }
     }
@@ -456,6 +460,14 @@ sub make_move {
         $self->{turn} = 'b'; 
         $self->{whites} |= $to_mask;
     }
+
+    my $prev_en_passant = $self->{en_passant};
+    if (defined $move->{en_passant}) {
+        $self->{en_passant} = $move->{en_passant};
+    } else {
+        $self->{en_passant} = 64;
+    }
+    $move->{en_passant} = $prev_en_passant;
     push(@{$self->{move_history}}, $move);
 }
 
@@ -464,20 +476,31 @@ sub undo_move {
     my $move = pop(@{$self->{move_history}});
     my $from_mask = 1 << $move->{from};
     my $to_mask = 1 << $move->{to};
-    my $moved_piece = "";
 
     $self->{castling} = $move->{castling};
     $self->{halfmove} = $move->{halfmove};
+    my $temp = $self->{en_passant};
     $self->{en_passant} = $move->{en_passant};
+    $move->{en_passant} = $temp;
 
-    for my $p ("pawns", "rooks", "bishops", "knights", "queens", "kings") {
-        if ($self->{$p} & $to_mask) {
-            $self->{$p} &= ~$to_mask;
-            $self->{$p} |= $from_mask;
-            $moved_piece = $p;
+    for my $piece_type ("pawns", "rooks", "bishops", "knights", "queens", "kings") {
+        if ($self->{$piece_type} & $to_mask) {
+            $self->{$piece_type} &= ~$to_mask;
+            $self->{$piece_type} |= $from_mask;
         }
-        if ($move->{captured_piece} eq $p) {
-            $self->{$p} |= $to_mask;
+        if ($move->{captured_piece} eq $piece_type) {
+            $self->{$piece_type} |= $to_mask;
+        }
+    }
+
+    if ($self->{en_passant} == $move->{to}) {
+        my $shift = $self->{turn} eq 'w' ? -8 : 8;
+        my $captured_square = 1 << ($move->{to} - $shift);
+        $self->{pawns} |= $captured_square;
+        if ($self->{turn} eq 'w') {
+            $self->{whites} |= $captured_square;
+        } else {
+            $self->{blacks} |= $captured_square;
         }
     }
 
@@ -500,7 +523,7 @@ sub undo_move {
     }
 }
 
-sub get_moves {
+sub get_move_strings {
     my $self = shift;
     my @moves;
     foreach my $move (@{$self->{moves}}) {

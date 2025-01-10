@@ -45,12 +45,12 @@ $select->add($socket);
 
 sub send_update {
     my $client = shift;
-    my $update = $chess->to_fen() . "|" . join(" ", $chess->get_moves()) . "\n";
+    my $update = $chess->to_fen() . "|" . join(" ", $chess->get_move_strings()) . "\n";
     $client->send($update);
 }
 
 sub broadcast_update {
-    my $update = $chess->to_fen() . "|" . join(" ", $chess->get_moves()) . "\n";
+    my $update = $chess->to_fen() . "|" . join(" ", $chess->get_move_strings()) . "\n";
     foreach my $client ($select->can_write(1)) {
         if ($client != $socket) {
             $client->send($update);
