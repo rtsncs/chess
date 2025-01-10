@@ -152,9 +152,13 @@ while true; do
 
     IFS= read -r -N1 -t0.01 char
     case $char in
-        q) break;;
+        w) break;;
         [a-h])
             if [[ ${#move} -eq 0 ]] || [[ ${#move} -eq 2 ]]; then
+                move="$move$char"
+                printf $char
+            fi
+            if [[ $char == "b" ]] && [[ ${#move} -eq 5 ]]; then
                 move="$move$char"
                 printf $char
             fi
@@ -177,8 +181,14 @@ while true; do
                 fi
             fi
             ;;
-        [bnrq])
+        "=")
             if [[ ${#move} -eq 4 ]]; then
+                move="$move$char"
+                printf $char
+            fi
+            ;;
+        [bnrq])
+            if [[ ${#move} -eq 5 ]]; then
                 move="$move$char"
                 printf $char
             fi

@@ -10,19 +10,10 @@ use Chess;
 
 my $fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 my $depth = 0;
+my $undo = 0;
 
-GetOptions('fen=s' => \$fen, 'depth=i' => \$depth) or die("Incorrect arguments\n");
+GetOptions('fen=s' => \$fen, 'depth=i' => \$depth, 'undo' => \$undo) or die("Incorrect arguments\n");
 
-#sub print_board {
-#    my $board = shift;
-#    for my $i (0..63) {
-#        print $board >> (63 - $i) & 1;
-#        if ($i % 8 == 7) {
-#            print "\n";
-#        }
-#    }
-#    print "\n";
-#}
 my $chess = Chess->from_fen($fen);
 
 if ($depth > 0) {
@@ -80,6 +71,10 @@ while (1) {
                 } else {
                     send_update($client);
                 }
+            } elsif ($data =~ "^undo" && $undo) {
+                $chess->undo_move();
+                $chess->generate_moves();
+                broadcast_update();
             }
         }
     }
