@@ -26,8 +26,8 @@ GetOptions('fen=s' => \$fen, 'depth=i' => \$depth) or die("Incorrect arguments\n
 my $chess = Chess->from_fen($fen);
 
 if ($depth > 0) {
-    print $chess->perft($depth) . "\n";
-    exit;
+    print $chess->divided_perft($depth) . "\n";
+    exit 0;
 }
 
 my $socket = new IO::Socket::INET(

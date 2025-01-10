@@ -344,7 +344,7 @@ sub parse_move {
 }
 
 sub move_to_string {
-    my $move = $_;
+    my $move = shift;
     my $promotion_string = "";
     return index_to_notation($move->{from}) . index_to_notation($move->{to}) . $promotion_string;
 }
@@ -457,25 +457,45 @@ sub undo_move {
 
 sub get_moves {
     my $self = shift;
-    return map(move_to_string, @{$self->{moves}});
+    my @moves;
+    foreach my $move (@{$self->{moves}}) {
+        push(@moves, move_to_string($move));
+    }
+    return @moves;
 }
 
 sub perft {
     my $self = shift;
     my $depth = shift;
-
+    if ($depth == 0) { 
+        return 1;
+    }
     if ($depth == 1) {
         return scalar @{$self->{moves}};
     }
 
-    my $moves = 0;
-
+    my $move_count = 0;
     foreach my $move (@{$self->{moves}}) {
         $self->make_move($move);
-        $moves += $self->perft($depth - 1);
+        $move_count += $self->perft($depth - 1);
         $self->undo_move();
     }
-    return $moves;
+    return $move_count;
+}
+
+sub divided_perft {
+    my $self = shift;
+    my $depth = shift;
+
+    my $move_count = 0;
+    foreach my $move (@{$self->{moves}}) {
+        $self->make_move($move);
+        my $result = $self->perft($depth - 1);
+        $move_count += $result;
+        print move_to_string($move) . ": $result\n";
+        $self->undo_move();
+    }
+    print "Total: $move_count";
 }
 
 sub notation_to_index {
