@@ -75,7 +75,7 @@ while (1) {
             print("received: $data");
             if ($data =~ "^make_move") {
                 my @data = split / /, $data;
-                if ($chess->make_move($data[1])) {
+                if ($chess->parse_make_move($data[1])) {
                     broadcast_update();
                 } else {
                     send_update($client);
