@@ -3,12 +3,15 @@ use strict;
 use warnings;
 use IO::Socket::INET;
 use IO::Select;
+use Getopt::Long;
 
 use lib '.';
 use Chess;
-foreach my $arg (@ARGV) {
 
-}
+my $fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+my $depth = 0;
+
+GetOptions('fen=s' => \$fen, 'depth=i' => \$depth) or die("Incorrect arguments\n");
 
 #sub print_board {
 #    my $board = shift;
@@ -20,7 +23,12 @@ foreach my $arg (@ARGV) {
 #    }
 #    print "\n";
 #}
-my $chess = Chess->from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+my $chess = Chess->from_fen($fen);
+
+if ($depth > 0) {
+    print $chess->perft($depth) . "\n";
+    exit;
+}
 
 my $socket = new IO::Socket::INET(
     LocalHost => '0.0.0.0',
@@ -64,7 +72,7 @@ while (1) {
                 print("client disconnected\n");
                 next;
             }
-            print("received: $data\n");
+            print("received: $data");
             if ($data =~ "^make_move") {
                 my @data = split / /, $data;
                 if ($chess->make_move($data[1])) {

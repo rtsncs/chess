@@ -26,12 +26,13 @@ sub from_fen {
     my $class = shift;
     my ($fen_board, $turn, $castling, $en_passant, $halfmove, $fullmove) = split / /, shift;
 
+    my @move_history;
     my $self = bless({
-        turn => $turn eq 'w' ? 0 : 1,
+        turn => $turn,
         halfmove => $halfmove,
         fullmove => $fullmove,
         en_passant => $en_passant eq "-" ? -1 : notation_to_index($en_passant),
-        castling => -1,
+        castling => $castling,
         pawns => 0,
         rooks => 0,
         bishops => 0,
@@ -40,6 +41,7 @@ sub from_fen {
         kings => 0,
         whites => 0,
         blacks => 0,
+        move_history => \@move_history,
     }, $class);
 
     my $mask = 1 << 63;
@@ -125,8 +127,8 @@ sub to_fen {
 
     return join(" ",
         $fen_board,
-        $self->{turn} ? "b" : "w",
-        $self->{castling} == -1 ? "-" : "KQkq",
+        $self->{turn},
+        $self->{castling},
         $self->{en_passant} == -1 ? "-" : index_to_notation($self->{en_passant}),
         $self->{halfmove},
         $self->{fullmove},
@@ -140,12 +142,12 @@ sub all_pieces {
 
 sub allied_pieces {
     my $self = shift;
-    return ($self->{turn} ? $self->{blacks} : $self->{whites});
+    return ($self->{turn} eq 'b' ? $self->{blacks} : $self->{whites});
 }
 
 sub enemy_pieces {
     my $self = shift;
-    return ($self->{turn} ? $self->{whites} : $self->{blacks});
+    return ($self->{turn} eq 'w' ? $self->{whites} : $self->{blacks});
 }
 
 # northwest    north   northeast
@@ -163,17 +165,17 @@ sub pawn_moves {
     my @moves;
 
     my $pawns = $self->{pawns} & $self->allied_pieces();
-    if (!$self->{turn}) {
+    if ($self->{turn} eq 'w') {
         $bit_moves = ($pawns << 8) & ~$self->all_pieces();
         for my $i (0..63) {
             my $mask = 1 << $i;
             if ($bit_moves & $mask) {
                 if ($i >= 56) {
                     for my $j (1..4) {
-                        push(@moves, $j | (($i - 8) << 4) | ($i << 12));
+                        push(@moves, { from => $i - 8, to => $i, promotion => $j});
                     }
                 } else {
-                    push(@moves, 0 | (($i - 8) << 4) | ($i << 12));
+                    push(@moves, { from => $i - 8, to => $i, promotion => 0});
                 }
             }
         }
@@ -184,23 +186,23 @@ sub pawn_moves {
             if ($bit_moves & $mask) {
                 if ($i < 8) {
                     for my $j (1..4) {
-                        push(@moves, $j | (($i + 8) << 4) | ($i << 12));
+                        push(@moves, { from => $i + 8, to => $i, promotion => 0});
                     }
                 } else {
-                    push(@moves, 0 | (($i + 8) << 4) | ($i << 12));
+                    push(@moves, { from => $i + 8, to => $i, promotion => 0});
                 }
             }
         }
     }
 
-    if (!$self->{turn}) {
+    if ($self->{turn} eq 'w') {
         $bit_moves = ($pawns & RANK_2) << 16;
         $bit_moves &= ~$self->all_pieces();
         $bit_moves &= ~($self->all_pieces() & RANK_3) << 8;
         for my $i (0..63) {
             my $mask = 1 << $i;
             if ($bit_moves & $mask) {
-                push(@moves, 0 | (($i - 16) << 4) | ($i << 12));
+                push(@moves, { from => $i - 16, to => $i, promotion => 0});
             }
         }
     } else {
@@ -210,7 +212,7 @@ sub pawn_moves {
         for my $i (0..63) {
             my $mask = 1 << $i;
             if ($bit_moves & $mask) {
-                push(@moves, 0 | (($i + 16) << 4) | ($i << 12));
+                push(@moves, { from => $i + 16, to => $i, promotion => 0});
             }
         }
     }
@@ -247,7 +249,7 @@ sub king_moves {
     for my $i (0..63) {
         my $mask = 1 << $i;
         if ($bit_moves & $mask) {
-            push(@moves, 0 | ($from << 4) | ($i << 12));
+            push(@moves, { from => $from, to => $i, promotion => 0});
         }
     }
 
@@ -279,7 +281,7 @@ sub knight_moves() {
             for my $j (0..63) {
                 my $move_mask = 1 << $j;
                 if ($bit_moves & $move_mask) {
-                    push(@moves, 0 | ($i << 4) | ($j << 12));
+                    push(@moves, { from => $i, to => $j, promotion => 0});
                 }
             }
         }
@@ -316,7 +318,7 @@ sub sliding_moves {
             for my $i (0..63) {
                 my $mask = 1 << $i;
                 if ($bit_moves & $mask) {
-                    push(@moves, 0 | (($i - $distance) << 4) | ($i << 12));
+                    push(@moves, { from => $i - $distance, to => $i, promotion => 0});
                 }
             }
             $bit_moves &= ~$self->enemy_pieces();
@@ -338,45 +340,47 @@ sub parse_move {
     }
     my $from = substr($move, 0, 2);
     my $to = substr($move, 2, 2);
-    return 0 | (notation_to_index($from) << 4) | (notation_to_index($to) << 12);
+    return { from => notation_to_index($from), to => notation_to_index($to), promotion => 0};
 }
 
 sub move_to_string {
     my $move = $_;
-    my $from = ($move >> 4) & 63;
-    my $to = ($move >> 12) & 63;
-    my $promotion = $move & 15;
     my $promotion_string = "";
-    if ($promotion eq 1) {
-        $promotion_string = "=r"
-    } elsif ($promotion eq 2) {
-        $promotion_string = "=n"
-    } elsif ($promotion eq 3) {
-        $promotion_string = "=b"
-    } elsif ($promotion eq 4) {
-        $promotion_string = "=q"
-    }
-    return index_to_notation($from) . index_to_notation($to) . $promotion_string;
+    return index_to_notation($move->{from}) . index_to_notation($move->{to}) . $promotion_string;
+}
+
+sub parse_make_move {
+    my $self = shift;
+    my $move = parse_move(shift);
+    $self->make_move($move);
 }
 
 sub make_move {
     my $self = shift;
-    my $move = parse_move(shift);
-    if (grep(/^$move$/, @{$self->{moves}})) {
-        print "$move is valid\n";
-        my $from = ($move >> 4) & 63;
-        my $to = ($move >> 12) & 63;
-        my $promotion = $move & 15;
+    my $move = shift;
+    my $valid = 0;
+    foreach my $m (@{$self->{moves}}) {
+        if ($m->{from} == $move->{from} && $m->{to} == $move->{to} && $m->{promotion} == $move->{promotion}) {
+            $valid = 1;
+            last;
+        }
+    }
+    if ($valid) {
+        my $from_mask = 1 << $move->{from};
+        my $to_mask = 1 << $move->{to};
 
-        my $from_mask = 1 << $from;
-        my $to_mask = 1 << $to;
+        $move->{castling} = $self->{castling};
+        $move->{halfmove} = $self->{halfmove};
+        $move->{en_passant} = $self->{en_passant};
+        $move->{captured_piece} = "";
 
         $self->{halfmove}++;
 
-        for my $pieces ($self->{pawns}, $self->{rooks}, $self->{bishops}, $self->{knights}, $self->{queens}, $self->{kings}) {
-            if ($pieces & $to_mask) {
-                $pieces &= ~$to_mask;
+        for my $p ("pawns", "rooks", "bishops", "knights", "queens", "kings") {
+            if ($self->{$p} & $to_mask) {
+                $self->{$p} &= ~$to_mask;
                 $self->{halfmove} = 0;
+                $move->{captured_piece} = $p;
                 last;
             }
         }
@@ -394,24 +398,84 @@ sub make_move {
         $self->{whites} &= ~($from_mask | $to_mask);
         $self->{blacks} &= ~($from_mask | $to_mask);
 
-        if ($self->{turn}) {
+        if ($self->{turn} eq 'b') {
+            $self->{turn} = 'w'; 
             $self->{blacks} |= $to_mask;
             $self->{fullmove}++;
         } else {
+            $self->{turn} = 'b'; 
             $self->{whites} |= $to_mask;
         }
-
-        $self->{turn} = !$self->{turn};
+        push(@{$self->{move_history}}, $move);
         $self->generate_moves();
-
         return 1;
     }
     return 0;
 }
 
+sub undo_move {
+    my $self = shift;
+    my $move = pop(@{$self->{move_history}});
+    my $from_mask = 1 << $move->{from};
+    my $to_mask = 1 << $move->{to};
+    my $moved_piece = "";
+
+    $self->{castling} = $move->{castling};
+    $self->{halfmove} = $move->{halfmove};
+    $self->{en_passant} = $move->{en_passant};
+
+    for my $p ("pawns", "rooks", "bishops", "knights", "queens", "kings") {
+        if ($self->{$p} & $to_mask) {
+            $self->{$p} &= ~$to_mask;
+            $self->{$p} |= $from_mask;
+            $moved_piece = $p;
+        }
+        if ($move->{captured_piece} eq $p) {
+            $self->{$p} |= $to_mask;
+        }
+    }
+
+    $self->{whites} &= ~($from_mask | $to_mask);
+    $self->{blacks} &= ~($from_mask | $to_mask);
+
+    if ($self->{turn} eq 'b') {
+        $self->{turn} = 'w'; 
+        $self->{whites} |= $from_mask;
+        if (!$move->{captured_piece} eq "") {
+            $self->{blacks} |= $to_mask;
+        }
+    } else {
+        $self->{turn} = 'b'; 
+        $self->{blacks} |= $from_mask;
+        if (!$move->{captured_piece} eq "") {
+            $self->{whites} |= $to_mask;
+        }
+        $self->{fullmove}--;
+    }
+    $self->generate_moves();
+}
+
 sub get_moves {
     my $self = shift;
     return map(move_to_string, @{$self->{moves}});
+}
+
+sub perft {
+    my $self = shift;
+    my $depth = shift;
+
+    if ($depth == 1) {
+        return scalar @{$self->{moves}};
+    }
+
+    my $moves = 0;
+
+    foreach my $move (@{$self->{moves}}) {
+        $self->make_move($move);
+        $moves += $self->perft($depth - 1);
+        $self->undo_move();
+    }
+    return $moves;
 }
 
 sub notation_to_index {
