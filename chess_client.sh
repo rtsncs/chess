@@ -1,5 +1,35 @@
 #!/bin/bash
 
+show_help() {
+    cat << EOF
+Usage:
+    ./chess_client.sh [-a ADDRESS] [-p PORT]
+
+OPTIONS
+  -a ADDRESS  Address of the chess server (default: localhost).
+  -p PORT     Port of the chess server (default: 38519).
+
+DESCRIPTION
+  This script is a text-based interface for playing chess, communicating with a
+  chess server via TCP protocol. The chessboard and pieces are displayed in the
+  terminal in a graphical style. The user can enter moves in long algebraic
+  notation (e.g., 'e2e4'), and the script sends these moves to the server.
+
+EXAMPLES
+  ./chess_client.sh
+      Starts the chess client with default settings (localhost, port 38519).
+  
+  ./chess_client.sh -a 192.168.1.100 -p 4000
+      Connects to the chess server at address 192.168.1.100 and port 4000.
+
+COMMANDS
+  - Moves can be entered in long algebraic notation, e.g., 'e2e4'.
+  - To promote a pawn, add the letter for the piece you want to promote to, e.g., 'e7e8=q' (promoting to a queen).
+  - To quit the program, press 'w'.
+EOF
+    exit
+}
+
 piece_color="\e[30m"
 black_color="\e[46m"
 white_color="\e[107m"
@@ -7,7 +37,7 @@ from_color="\e[43m"
 to_color="\e[105m"
 possible_color="\e[102m"
 
-TEMP=$(getopt -o "a:p:" -n "$0" -- "$@")
+TEMP=$(getopt -o "a:hp:" -l "help" -n "$0" -- "$@")
 eval set -- "$TEMP"
 
 ADDRESS=localhost
@@ -15,6 +45,9 @@ PORT=38519
 
 while true; do
     case $1 in
+        --help|-h)
+            show_help
+            ;;
         -a)
             ADDRESS=$2
             shift 2;;
@@ -33,12 +66,12 @@ move=
 active=
 
 parse_fen() {
-    fen_string="$1"
+    local fen_string="$1"
     IFS=' ' read -r fen_board active castling en_passant halfmove fullmove <<< "$fen_string"
 
-    j=0
+    local j=0
     for ((i=0; i<${#fen_board}; i++)); do
-        char="${fen_board:$i:1}"
+        local char="${fen_board:$i:1}"
         
         case $char in
             [a-zA-Z]) board[j]=$char; ((j++));;
@@ -85,11 +118,11 @@ piece_to_char() {
 }
 
 draw_square() {
-    file=$(file_to_number ${1:0:1})
-    rank=$((8 - ${1:1:1}))
-    piece=$(piece_to_char ${board[((rank * 8 + file))]})
+    local file=$(file_to_number ${1:0:1})
+    local rank=$((8 - ${1:1:1}))
+    local piece=$(piece_to_char ${board[((rank * 8 + file))]})
 
-    bg_col=$2
+    local bg_col=$2
     
     if [[ -z $bg_col ]]; then
         if (((rank + file) % 2 == 0)); then
@@ -102,27 +135,23 @@ draw_square() {
     printf "\e[s\e[%s;%sH$piece_color$bg_col$piece \e[u\e[m" $((rank + 1)) $((file * 2 + 1))
 }
 
-draw_file() {
-    file=$1
-}
-
 draw() {
-    buffer='\e[2J\e[H'
-    row=8
-    col=8
+    local buffer='\e[2J\e[H'
+    local rank=8
+    local file=8
     for piece in ${board[@]}; do
-        bg_col=$black_color
-        if (((row + col) % 2 == 0)); then
+        local bg_col=$black_color
+        if (((rank + file) % 2 == 0)); then
             bg_col=$white_color
         fi
 
         piece=$(piece_to_char $piece)
 
         buffer="$buffer$bg_col$piece_color$piece "
-        if ((--col < 1 )); then
-            col=8
+        if ((--file < 1 )); then
+            file=8
             buffer="$buffer\e[m $row\n"
-            ((row--))
+            ((rank--))
         fi
     done
 
@@ -133,7 +162,14 @@ draw() {
 cleanup() {
     stty sane
     printf '\e[?1049l'
-    exit
+    local status=0
+    if [[ -n "$1" ]]; then
+        echo "$1"
+    fi
+    if [[ -n "$2" ]]; then
+        status=$2
+    fi
+    exit $status
 }
 
 trap cleanup SIGTERM SIGINT
@@ -141,10 +177,16 @@ trap cleanup SIGTERM SIGINT
 printf '\e[?1049h'
 stty cbreak -echo -nl
 
+if ( ! exec 3<>/dev/tcp/$ADDRESS/$PORT ); then
+    cleanup "Error connecting to the server." 1
+fi
 exec 3<>/dev/tcp/$ADDRESS/$PORT
 while true; do
     IFS="|" read -r -t0.01 fen moves_str <&3
     if [[ -n "$fen" ]]; then
+        if [[ "$fen" == "shutdown" ]]; then
+            cleanup "Server shutdown." 1
+        fi;
         parse_fen "$fen"
         moves=($moves_str)
         draw

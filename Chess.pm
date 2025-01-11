@@ -441,7 +441,7 @@ sub is_square_attacked {
 sub parse_move {
     my $move = shift;
     if ($move !~ /^[a-h][1-8][a-h][1-8](=[rqnb])?$/i) {
-        return 0;
+        return "err";
     }
     my $from = substr($move, 0, 2);
     my $to = substr($move, 2, 2);
@@ -469,6 +469,10 @@ sub parse_make_move {
     my $self = shift;
     my $move_string = shift;
     my $move = parse_move($move_string);
+
+    if ($move eq "err") {
+        return 0;
+    }
 
     foreach my $m (@{$self->{moves}}) {
         if ($m->{from} == $move->{from} && $m->{to} == $move->{to} && $m->{promotion} eq $move->{promotion}) {
